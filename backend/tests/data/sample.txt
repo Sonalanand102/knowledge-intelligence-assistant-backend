@@ -1,0 +1,5 @@
+Knowledge Intelligence Assistant is a multi-source RAG system.
+
+It can ingest documents, web pages, videos, audio and images.
+
+The system retrieves relevant information and generates grounded answers.
