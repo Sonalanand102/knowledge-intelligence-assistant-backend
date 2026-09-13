@@ -23,9 +23,9 @@ documents = load_youtube(
 )
 
 
-print(f"\nTotal documents: {len(documents)}")
+print(f"\nTotal documents: {len(documents.elements)}")
 
-for document in documents:
+for document in documents.elements:
     print("\n---")
 
     print(
