@@ -396,3 +396,127 @@ def test_chunk_indices_are_global_and_sequential():
     assert [chunk.chunk_index for chunk in chunks] == list(
         range(len(chunks))
     )
+
+def test_oversized_text_prefers_natural_boundaries():
+    result = IngestionResult(
+        document_id="document-1",
+        elements=[
+            make_text_element(
+                "element-1",
+                (
+                    "This is the first sentence. "
+                    "This is the second sentence. "
+                    "This is the third sentence. "
+                    "This is the fourth sentence."
+                ),
+            ),
+        ],
+        relationships=[],
+    )
+
+    chunks = chunk_documents(
+        result,
+        chunk_size=45,
+        chunk_overlap=0,
+    )
+
+    assert len(chunks) > 1
+
+    for chunk in chunks:
+        assert len(chunk.content) <= 45
+
+
+def test_oversized_element_preserves_split_metadata():
+    result = IngestionResult(
+        document_id="document-1",
+        elements=[
+            make_text_element(
+                "element-1",
+                "one two three four five six seven eight nine ten",
+            ),
+        ],
+        relationships=[],
+    )
+
+    chunks = chunk_documents(
+        result,
+        chunk_size=20,
+        chunk_overlap=0,
+    )
+
+    assert len(chunks) > 1
+
+    for chunk in chunks:
+        assert chunk.metadata["element_ids"] == ["element-1"]
+        assert chunk.metadata["split_from_element"] is True
+        assert "split_index" in chunk.metadata
+        assert "split_count" in chunk.metadata
+
+
+def test_chunk_overlap_is_supported():
+    result = IngestionResult(
+        document_id="document-1",
+        elements=[
+            make_text_element(
+                "element-1",
+                (
+                    "This is a long piece of text that should "
+                    "be split into overlapping chunks."
+                ),
+            ),
+        ],
+        relationships=[],
+    )
+
+    chunks = chunk_documents(
+        result,
+        chunk_size=40,
+        chunk_overlap=10,
+    )
+
+    assert len(chunks) > 1
+
+    for chunk in chunks:
+        assert len(chunk.content) <= 40
+
+
+def test_invalid_chunk_size_raises_error():
+    result = IngestionResult(
+        document_id="document-1",
+        elements=[
+            make_text_element("element-1", "Hello"),
+        ],
+        relationships=[],
+    )
+
+    try:
+        chunk_documents(
+            result,
+            chunk_size=0,
+            chunk_overlap=0,
+        )
+    except ValueError as exc:
+        assert "chunk_size" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_invalid_overlap_raises_error():
+    result = IngestionResult(
+        document_id="document-1",
+        elements=[
+            make_text_element("element-1", "Hello"),
+        ],
+        relationships=[],
+    )
+
+    try:
+        chunk_documents(
+            result,
+            chunk_size=20,
+            chunk_overlap=20,
+        )
+    except ValueError as exc:
+        assert "chunk_overlap" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")

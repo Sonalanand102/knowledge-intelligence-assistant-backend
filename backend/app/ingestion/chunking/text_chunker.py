@@ -4,13 +4,15 @@ from collections import defaultdict
 from copy import deepcopy
 from typing import Any
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from backend.app.ingestion.models.chunk_document import ChunkDocument
 from backend.app.ingestion.models.content import TableContent, TextContent
 from backend.app.ingestion.models.ingestion_result import IngestionResult
 from backend.app.ingestion.models.source_element import SourceElement
 
 
-# Relationships strong enough to influence chunk grouping.
+# These relationships are strong enough to influence chunk grouping.
 GROUPING_RELATIONSHIPS = {
     "contains",
     "parent_of",
@@ -21,8 +23,9 @@ GROUPING_RELATIONSHIPS = {
     "belongs_to",
 }
 
-# These relationships provide ordering/context, but do not merge
-# otherwise unrelated elements into the same group.
+
+# These relationships provide context but should not force two otherwise
+# unrelated textual elements into the same chunk.
 CONTEXT_RELATIONSHIPS = {
     "follows",
     "precedes",
@@ -32,7 +35,7 @@ CONTEXT_RELATIONSHIPS = {
 
 
 def _get_text(element: SourceElement) -> str | None:
-    """Return chunkable textual content."""
+    """Return text that can be included in a textual chunk."""
     if isinstance(element.content, TextContent):
         return element.content.text
 
@@ -51,8 +54,9 @@ def _build_relationship_maps(
 ) -> tuple[dict[str, set[str]], dict[str, list]]:
     """
     Build:
-    1. grouping adjacency
-    2. all relationship metadata by element
+
+    1. A graph containing only strong grouping relationships.
+    2. A mapping of all relationships touching each element.
     """
     grouping_graph: dict[str, set[str]] = defaultdict(set)
     relationships_by_element: dict[str, list] = defaultdict(list)
@@ -60,12 +64,11 @@ def _build_relationship_maps(
     for relationship in relationships:
         source_id = relationship.source_element_id
         target_id = relationship.target_element_id
-        relationship_type = relationship.relationship_type
 
         relationships_by_element[source_id].append(relationship)
         relationships_by_element[target_id].append(relationship)
 
-        if relationship_type in GROUPING_RELATIONSHIPS:
+        if relationship.relationship_type in GROUPING_RELATIONSHIPS:
             grouping_graph[source_id].add(target_id)
             grouping_graph[target_id].add(source_id)
 
@@ -77,9 +80,9 @@ def _build_groups(
     relationships: list,
 ) -> list[list[SourceElement]]:
     """
-    Build connected groups using only strong semantic relationships.
+    Group chunkable elements using strong semantic relationships.
 
-    Original element order is preserved.
+    Original source order is preserved.
     """
     element_by_id = {
         element.element_id: element
@@ -97,6 +100,7 @@ def _build_groups(
         if element_id in visited:
             continue
 
+        # Non-textual elements are not textual chunk groups.
         if not _is_chunkable(element):
             visited.add(element_id)
             continue
@@ -141,46 +145,68 @@ def _build_groups(
     return groups
 
 
+def _create_text_splitter(
+    chunk_size: int,
+    chunk_overlap: int,
+) -> RecursiveCharacterTextSplitter:
+    """
+    Create the recursive splitter used when an individual textual group
+    exceeds the configured size.
+
+    Separator priority:
+        paragraph → line → sentence → word → character
+    """
+    return RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=[
+            "\n\n",
+            "\n",
+            ". ",
+            "? ",
+            "! ",
+            " ",
+            "",
+        ],
+        keep_separator=True,
+    )
+
+
 def _split_text(
     text: str,
     chunk_size: int,
     chunk_overlap: int,
 ) -> list[str]:
     """
-    Split oversized text while preserving a simple overlap.
-
-    This remains a deterministic fallback for groups that exceed
-    the configured chunk size.
+    Recursively split oversized text while preferring natural boundaries.
     """
+    if not text:
+        return []
+
     if len(text) <= chunk_size:
         return [text]
 
-    if chunk_overlap >= chunk_size:
-        raise ValueError(
-            "chunk_overlap must be smaller than chunk_size"
-        )
+    splitter = _create_text_splitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
 
-    chunks: list[str] = []
-    start = 0
-
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunks.append(text[start:end])
-
-        if end >= len(text):
-            break
-
-        start = end - chunk_overlap
-
-    return chunks
+    return [
+        chunk.strip()
+        for chunk in splitter.split_text(text)
+        if chunk.strip()
+    ]
 
 
 def _group_relationship_metadata(
     group: list[SourceElement],
     relationships: list,
 ) -> list[dict[str, Any]]:
-    """Return relationships touching elements in this chunk group."""
-    group_ids = {element.element_id for element in group}
+    """Return all relationships touching this chunk's elements."""
+    group_ids = {
+        element.element_id
+        for element in group
+    }
 
     metadata: list[dict[str, Any]] = []
 
@@ -205,17 +231,26 @@ def _build_chunk_metadata(
     group: list[SourceElement],
     relationships: list,
 ) -> dict[str, Any]:
-    """Build provenance and relationship metadata for a chunk."""
-    group_ids = {element.element_id for element in group}
+    """
+    Build provenance and relationship metadata for a chunk.
+    """
+    group_ids = {
+        element.element_id
+        for element in group
+    }
 
     related_element_ids: set[str] = set()
 
     for relationship in relationships:
         if relationship.source_element_id in group_ids:
-            related_element_ids.add(relationship.target_element_id)
+            related_element_ids.add(
+                relationship.target_element_id
+            )
 
         if relationship.target_element_id in group_ids:
-            related_element_ids.add(relationship.source_element_id)
+            related_element_ids.add(
+                relationship.source_element_id
+            )
 
     related_element_ids -= group_ids
 
@@ -232,13 +267,16 @@ def _build_chunk_metadata(
             group,
             relationships,
         ),
-        "related_element_ids": sorted(related_element_ids),
+        "related_element_ids": sorted(
+            related_element_ids
+        ),
     }
 
-    # Preserve metadata from source elements.
+    # Preserve source metadata.
     #
-    # For a group, values that exist on all elements and are identical
-    # are promoted to the chunk level.
+    # A metadata key is promoted to chunk level only when:
+    # - it appears on exactly one element, or
+    # - all elements have the same value.
     keys: set[str] = set()
 
     for element in group:
@@ -254,7 +292,10 @@ def _build_chunk_metadata(
         if len(values) == 1:
             metadata[key] = deepcopy(values[0])
 
-        elif values and all(value == values[0] for value in values):
+        elif values and all(
+            value == values[0]
+            for value in values
+        ):
             metadata[key] = deepcopy(values[0])
 
     return metadata
@@ -269,9 +310,10 @@ def _create_group_chunks(
     starting_index: int,
 ) -> list[ChunkDocument]:
     """
-    Create chunks from one relationship group.
+    Build chunks from one relationship group.
 
-    Elements are combined until the chunk-size budget is exceeded.
+    Related elements are kept together as long as the size budget allows.
+    Oversized individual elements are recursively split.
     """
     chunks: list[ChunkDocument] = []
 
@@ -330,14 +372,14 @@ def _create_group_chunks(
 
         element_length = len(text)
 
-        # Oversized individual element.
+        # An individual element is larger than the configured budget.
         if element_length > chunk_size:
             flush()
 
             pieces = _split_text(
-                text,
-                chunk_size,
-                chunk_overlap,
+                text=text,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
 
             for piece_index, piece in enumerate(pieces):
@@ -363,6 +405,7 @@ def _create_group_chunks(
             continue
 
         separator_length = 2 if current_elements else 0
+
         proposed_length = (
             current_length
             + separator_length
@@ -373,11 +416,11 @@ def _create_group_chunks(
             flush()
 
         current_elements.append(element)
-        current_length = (
-            element_length
-            if len(current_elements) == 1
-            else current_length + 2 + element_length
-        )
+
+        if len(current_elements) == 1:
+            current_length = element_length
+        else:
+            current_length += 2 + element_length
 
     flush()
 
@@ -390,17 +433,28 @@ def chunk_documents(
     chunk_overlap: int = 100,
 ) -> list[ChunkDocument]:
     """
-    Convert a preprocessed IngestionResult into relationship-aware chunks.
+    Convert an IngestionResult into relationship-aware chunks.
 
-    Strong semantic relationships can group elements together.
-    Weak/contextual relationships are preserved as metadata but do not
-    force unrelated elements into the same textual chunk.
+    Strategy:
+
+        1. Group semantically related elements.
+        2. Preserve source order.
+        3. Keep related elements together when possible.
+        4. Recursively split oversized textual elements.
+        5. Preserve relationships and provenance in metadata.
+
+    Contextual relationships such as spatial or temporal adjacency do not
+    force unrelated textual elements into the same text chunk.
     """
     if chunk_size <= 0:
-        raise ValueError("chunk_size must be greater than zero")
+        raise ValueError(
+            "chunk_size must be greater than zero"
+        )
 
     if chunk_overlap < 0:
-        raise ValueError("chunk_overlap cannot be negative")
+        raise ValueError(
+            "chunk_overlap cannot be negative"
+        )
 
     if chunk_overlap >= chunk_size:
         raise ValueError(
@@ -415,15 +469,15 @@ def chunk_documents(
     chunks: list[ChunkDocument] = []
 
     for group in groups:
-        group_chunks = _create_group_chunks(
-            group=group,
-            relationships=ingestion_result.relationships,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            document_id=ingestion_result.document_id,
-            starting_index=len(chunks),
+        chunks.extend(
+            _create_group_chunks(
+                group=group,
+                relationships=ingestion_result.relationships,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                document_id=ingestion_result.document_id,
+                starting_index=len(chunks),
+            )
         )
-
-        chunks.extend(group_chunks)
 
     return chunks
