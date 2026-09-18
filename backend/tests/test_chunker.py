@@ -7,7 +7,9 @@ from backend.app.ingestion.models.content import (
 from backend.app.ingestion.models.element_relationship import ElementRelationship
 from backend.app.ingestion.models.ingestion_result import IngestionResult
 from backend.app.ingestion.models.source_element import SourceElement
+import pytest
 
+from backend.app.ingestion.models.chunk_document import ChunkDocument
 
 def make_text_element(
     element_id: str,
@@ -520,3 +522,28 @@ def test_invalid_overlap_raises_error():
         assert "chunk_overlap" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+
+def test_chunk_document_has_stable_chunk_id():
+    chunk = ChunkDocument(
+        content="This is a test chunk.",
+        document_id="doc_123",
+        chunk_index=0,
+    )
+
+    assert chunk.chunk_id
+    assert isinstance(chunk.chunk_id, str)
+
+def test_chunk_ids_are_unique_for_different_chunks():
+    chunk_1 = ChunkDocument(
+        content="First chunk.",
+        document_id="doc_123",
+        chunk_index=0,
+    )
+
+    chunk_2 = ChunkDocument(
+        content="Second chunk.",
+        document_id="doc_123",
+        chunk_index=1,
+    )
+
+    assert chunk_1.chunk_id != chunk_2.chunk_id

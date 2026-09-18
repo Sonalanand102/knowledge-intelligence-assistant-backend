@@ -1,3 +1,4 @@
+from backend.app.db.models.ingestion_run import IngestionRun
 from backend.app.ingestion.models.content import TextContent
 from backend.app.ingestion.models.source_element import SourceElement
 from backend.app.ingestion.preprocessing.deduplication import (
@@ -109,3 +110,10 @@ def test_deduplication_does_not_modify_original_list():
     deduplicate_elements(elements)
 
     assert [element.element_id for element in elements] == original_ids
+
+def test_ingestion_run_document_id_is_nullable():
+    column = IngestionRun.__table__.columns[
+        "document_id"
+    ]
+
+    assert column.nullable is True
