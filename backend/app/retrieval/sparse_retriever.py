@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from backend.app.retrieval.base import SparseVectorStore
-from backend.app.retrieval.base import VectorSearchResult
+from backend.app.retrieval.base import (
+    SparseVectorStore,
+    VectorSearchResult,
+)
 
 
 class SparseRetriever:
@@ -15,6 +17,7 @@ class SparseRetriever:
         self,
         query: str,
         top_k: int = 5,
+        document_ids: list[str] | None = None,
     ) -> list[VectorSearchResult]:
         if not query or not query.strip():
             raise ValueError(
@@ -24,6 +27,13 @@ class SparseRetriever:
         if top_k <= 0:
             raise ValueError(
                 "top_k must be greater than zero"
+            )
+
+        if document_ids:
+            return await self.vector_store.search_sparse(
+                query=query,
+                top_k=top_k,
+                document_ids=document_ids,
             )
 
         return await self.vector_store.search_sparse(

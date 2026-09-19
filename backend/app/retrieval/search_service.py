@@ -6,6 +6,7 @@ from backend.app.retrieval.base import VectorSearchResult
 from backend.app.retrieval.dense_retriever import DenseRetriever
 from backend.app.retrieval.hybrid_retriever import HybridRetriever
 
+
 @dataclass(frozen=True)
 class SearchResponse:
     query: str
@@ -29,6 +30,7 @@ class SearchService:
         self,
         query: str,
         top_k: int = 5,
+        document_ids: list[str] | None = None,
     ) -> SearchResponse:
         if not query.strip():
             raise ValueError(
@@ -40,10 +42,17 @@ class SearchService:
                 "top_k must be greater than zero"
             )
 
-        results = await self.retriever.retrieve(
-            query=query,
-            top_k=top_k,
-        )
+        if document_ids:
+            results = await self.retriever.retrieve(
+                query=query,
+                top_k=top_k,
+                document_ids=document_ids,
+            )
+        else:
+            results = await self.retriever.retrieve(
+                query=query,
+                top_k=top_k,
+            )
 
         return SearchResponse(
             query=query,

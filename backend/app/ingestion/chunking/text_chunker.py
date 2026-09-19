@@ -230,10 +230,20 @@ def _group_relationship_metadata(
 def _build_chunk_metadata(
     group: list[SourceElement],
     relationships: list,
+    document_id: str,
 ) -> dict[str, Any]:
     """
     Build provenance and relationship metadata for a chunk.
+
+    Element and relationship IDs are normalized to the same
+    globally unique IDs used by relational persistence.
     """
+
+    def canonical_element_id(
+        element_id: str,
+    ) -> str:
+        return f"{document_id}:{element_id}"
+
     group_ids = {
         element.element_id
         for element in group
@@ -256,19 +266,39 @@ def _build_chunk_metadata(
 
     metadata: dict[str, Any] = {
         "element_ids": [
-            element.element_id
+            canonical_element_id(
+                element.element_id
+            )
             for element in group
         ],
         "element_types": [
             element.element_type
             for element in group
         ],
-        "relationships": _group_relationship_metadata(
-            group,
-            relationships,
-        ),
+        "relationships": [
+            {
+                "source_element_id": canonical_element_id(
+                    relationship.source_element_id
+                ),
+                "relationship_type": (
+                    relationship.relationship_type
+                ),
+                "target_element_id": canonical_element_id(
+                    relationship.target_element_id
+                ),
+                "metadata": deepcopy(
+                    relationship.metadata
+                ),
+            }
+            for relationship in relationships
+            if (
+                relationship.source_element_id in group_ids
+                or relationship.target_element_id in group_ids
+            )
+        ],
         "related_element_ids": sorted(
-            related_element_ids
+            canonical_element_id(element_id)
+            for element_id in related_element_ids
         ),
     }
 
@@ -299,7 +329,6 @@ def _build_chunk_metadata(
             metadata[key] = deepcopy(values[0])
 
     return metadata
-
 
 def _create_group_chunks(
     group: list[SourceElement],
@@ -352,6 +381,7 @@ def _create_group_chunks(
                 metadata=_build_chunk_metadata(
                     current_elements,
                     relationships,
+                    document_id,
                 ),
             )
         )
@@ -386,6 +416,7 @@ def _create_group_chunks(
                 metadata = _build_chunk_metadata(
                     [element],
                     relationships,
+                    document_id,
                 )
 
                 chunks.append(

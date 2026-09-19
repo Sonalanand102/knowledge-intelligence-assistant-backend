@@ -31,6 +31,7 @@ dependencies = [
     "uvicorn>=0.52.4",
     "youtube-transcript-api>=1.2.4",
     "yt-dlp>=2026.8.19",
+    "rq>=2.0",
 ]
 
 [project.scripts]

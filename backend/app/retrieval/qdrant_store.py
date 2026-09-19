@@ -9,7 +9,6 @@ from backend.app.ingestion.models.chunk_document import ChunkDocument
 from backend.app.retrieval.base import VectorSearchResult
 
 
-
 class QdrantVectorStore:
     BM25_VECTOR_NAME = "bm25"
     DEFAULT_COLLECTION_NAME = "knowledge_chunks"
@@ -43,9 +42,10 @@ class QdrantVectorStore:
                     distance=models.Distance.COSINE,
                 ),
                 sparse_vectors_config={
-                    self.BM25_VECTOR_NAME: models.SparseVectorParams(
-                        modifier=models.Modifier.IDF,
-                    ),
+                    self.BM25_VECTOR_NAME:
+                        models.SparseVectorParams(
+                            modifier=models.Modifier.IDF,
+                        ),
                 },
             )
             return
@@ -55,7 +55,7 @@ class QdrantVectorStore:
         )
 
         assert (
-            "bm25"
+            self.BM25_VECTOR_NAME
             in collection_info.config.params.sparse_vectors
         )
 
@@ -203,6 +203,7 @@ class QdrantVectorStore:
         self,
         query_embedding: list[float],
         top_k: int,
+        document_ids: list[str] | None = None,
     ) -> list[VectorSearchResult]:
         if not query_embedding:
             raise ValueError(
@@ -214,83 +215,30 @@ class QdrantVectorStore:
                 "top_k must be greater than zero"
             )
 
+        query_filter = self._build_document_filter(
+            document_ids
+        )
+
         response = await self.client.query_points(
             collection_name=self.collection_name,
             query=query_embedding,
+            query_filter=query_filter,
             limit=top_k,
             with_payload=True,
         )
 
-        results: list[VectorSearchResult] = []
-
-        for point in response.points:
-            payload = point.payload or {}
-
-            chunk_id = payload.get("chunk_id")
-            document_id = payload.get("document_id")
-            chunk_index = payload.get("chunk_index")
-            content = payload.get("content")
-
-            if chunk_id is None:
-                raise ValueError(
-                    "Qdrant result is missing chunk_id"
-                )
-
-            if document_id is None:
-                raise ValueError(
-                    "Qdrant result is missing document_id"
-                )
-
-            if chunk_index is None:
-                raise ValueError(
-                    "Qdrant result is missing chunk_index"
-                )
-
-            if content is None:
-                raise ValueError(
-                    "Qdrant result is missing content"
-                )
-
-            metadata = payload.get(
-                "metadata",
-                {},
-            )
-
-            results.append(
-                VectorSearchResult(
-                    chunk_id=str(chunk_id),
-                    document_id=str(document_id),
-                    chunk_index=int(chunk_index),
-                    content=str(content),
-                    score=float(point.score),
-                    metadata=dict(metadata),
-                )
-            )
-
-        return results
-    
-    
-
-    @staticmethod
-    def _point_id(
-        chunk_id: str,
-    ) -> str:
-        """
-        Generate a deterministic UUID for the Qdrant point.
-
-        The application-level chunk ID remains the canonical
-        identity and is stored in the payload.
-        """
-        return str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"knowledge-intelligence-assistant:{chunk_id}",
-            )
+        return self._parse_search_results(
+            response.points
         )
 
-    async def delete_by_document_id(self, document_id: str) -> None:
+    async def delete_by_document_id(
+        self,
+        document_id: str,
+    ) -> None:
         if not document_id or not document_id.strip():
-            raise ValueError("document_id must be non-empty")
+            raise ValueError(
+                "document_id must be non-empty"
+            )
 
         await self.client.delete(
             collection_name=self.collection_name,
@@ -299,7 +247,9 @@ class QdrantVectorStore:
                     must=[
                         models.FieldCondition(
                             key="document_id",
-                            match=models.MatchValue(value=document_id),
+                            match=models.MatchValue(
+                                value=document_id
+                            ),
                         )
                     ]
                 )
@@ -318,10 +268,11 @@ class QdrantVectorStore:
             models.PointVectors(
                 id=self._point_id(chunk.chunk_id),
                 vector={
-                    "bm25": models.Document(
-                        text=chunk.content,
-                        model="qdrant/bm25",
-                    )
+                    self.BM25_VECTOR_NAME:
+                        models.Document(
+                            text=chunk.content,
+                            model="qdrant/bm25",
+                        )
                 },
             )
             for chunk in chunks
@@ -337,6 +288,7 @@ class QdrantVectorStore:
         self,
         query: str,
         top_k: int,
+        document_ids: list[str] | None = None,
     ) -> list[VectorSearchResult]:
         if not query or not query.strip():
             raise ValueError(
@@ -348,6 +300,10 @@ class QdrantVectorStore:
                 "top_k must be greater than zero"
             )
 
+        query_filter = self._build_document_filter(
+            document_ids
+        )
+
         response = await self.client.query_points(
             collection_name=self.collection_name,
             query=models.Document(
@@ -355,13 +311,50 @@ class QdrantVectorStore:
                 model="qdrant/bm25",
             ),
             using=self.BM25_VECTOR_NAME,
+            query_filter=query_filter,
             limit=top_k,
             with_payload=True,
         )
 
+        return self._parse_search_results(
+            response.points
+        )
+
+    @staticmethod
+    def _build_document_filter(
+        document_ids: list[str] | None,
+    ) -> models.Filter | None:
+        if not document_ids:
+            return None
+
+        normalized_ids = [
+            document_id.strip()
+            for document_id in document_ids
+            if document_id
+            and document_id.strip()
+        ]
+
+        if not normalized_ids:
+            return None
+
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchAny(
+                        any=normalized_ids
+                    ),
+                )
+            ]
+        )
+
+    @staticmethod
+    def _parse_search_results(
+        points,
+    ) -> list[VectorSearchResult]:
         results: list[VectorSearchResult] = []
 
-        for point in response.points:
+        for point in points:
             payload = point.payload or {}
 
             chunk_id = payload.get("chunk_id")
@@ -406,3 +399,21 @@ class QdrantVectorStore:
             )
 
         return results
+
+    @staticmethod
+    def _point_id(
+        chunk_id: str,
+    ) -> str:
+        """
+        Generate a deterministic UUID for the Qdrant point.
+
+        The application-level chunk ID remains the canonical
+        identity and is stored in the payload.
+        """
+
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"knowledge-intelligence-assistant:{chunk_id}",
+            )
+        )

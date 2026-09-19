@@ -15,7 +15,10 @@ class HybridRetriever:
     ) -> None:
 
         if rrf_k <= 0:
-            raise ValueError("rrf_k must be greater than 0")
+            raise ValueError(
+                "rrf_k must be greater than 0"
+            )
+
         self.dense_retriever = dense_retriever
         self.sparse_retriever = sparse_retriever
         self.rrf_k = rrf_k
@@ -24,7 +27,8 @@ class HybridRetriever:
         self,
         query: str,
         top_k: int = 5,
-        candidate_k: int = 10,
+        candidate_k: int | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[VectorSearchResult]:
         if not query or not query.strip():
             raise ValueError(
@@ -36,6 +40,9 @@ class HybridRetriever:
                 "top_k must be greater than zero"
             )
 
+        if candidate_k is None:
+            candidate_k = max(10, top_k)
+
         if candidate_k <= 0:
             raise ValueError(
                 "candidate_k must be greater than zero"
@@ -46,16 +53,34 @@ class HybridRetriever:
                 "candidate_k must be greater than or equal to top_k"
             )
 
-        dense_results, sparse_results = await asyncio.gather(
-            self.dense_retriever.retrieve(
-                query,
-                top_k=candidate_k,
-            ),
-            self.sparse_retriever.retrieve(
-                query,
-                top_k=candidate_k,
-            ),
-        )
+        if document_ids:
+            dense_results, sparse_results = (
+                await asyncio.gather(
+                    self.dense_retriever.retrieve(
+                        query,
+                        top_k=candidate_k,
+                        document_ids=document_ids,
+                    ),
+                    self.sparse_retriever.retrieve(
+                        query,
+                        top_k=candidate_k,
+                        document_ids=document_ids,
+                    ),
+                )
+            )
+        else:
+            dense_results, sparse_results = (
+                await asyncio.gather(
+                    self.dense_retriever.retrieve(
+                        query,
+                        top_k=candidate_k,
+                    ),
+                    self.sparse_retriever.retrieve(
+                        query,
+                        top_k=candidate_k,
+                    ),
+                )
+            )
 
         return reciprocal_rank_fusion(
             [

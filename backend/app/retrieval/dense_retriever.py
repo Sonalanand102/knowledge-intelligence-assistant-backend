@@ -26,6 +26,7 @@ class DenseRetriever:
         self,
         query: str,
         top_k: int = 5,
+        document_ids: list[str] | None = None,
     ) -> list[VectorSearchResult]:
         if not query.strip():
             raise ValueError(
@@ -41,6 +42,13 @@ class DenseRetriever:
             self.embedding_service.embed_query,
             query,
         )
+
+        if document_ids:
+            return await self.vector_store.search(
+                query_embedding=query_embedding,
+                top_k=top_k,
+                document_ids=document_ids,
+            )
 
         return await self.vector_store.search(
             query_embedding=query_embedding,

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from backend.app.embeddings.service import EmbeddedChunk
+from backend.app.ingestion.models.chunk_document import ChunkDocument
 
 
 @dataclass(frozen=True)
@@ -40,11 +41,9 @@ class VectorStore(Protocol):
         self,
         query_embedding: list[float],
         top_k: int,
+        document_ids: list[str] | None = None,
     ) -> list[VectorSearchResult]:
         ...
-
-
-from backend.app.ingestion.models.chunk_document import ChunkDocument
 
 
 class SparseVectorStore(Protocol):
@@ -58,8 +57,24 @@ class SparseVectorStore(Protocol):
         self,
         query: str,
         top_k: int,
+        document_ids: list[str] | None = None,
     ) -> list[VectorSearchResult]:
         ...
 
-class VectorIndexStore(VectorStore, SparseVectorStore, Protocol):
+
+class VectorIndexStore(
+    VectorStore,
+    SparseVectorStore,
+    Protocol,
+):
     pass
+
+
+class Retriever(Protocol):
+    async def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        document_ids: list[str] | None = None,
+    ) -> list[VectorSearchResult]:
+        ...

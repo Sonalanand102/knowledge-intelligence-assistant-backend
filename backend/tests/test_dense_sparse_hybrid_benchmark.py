@@ -20,6 +20,9 @@ from backend.app.evaluation.datasets.embedding_dataset import (
 from backend.app.evaluation.retrieval_runner import (
     DenseRetrievalEvaluationRunner,
 )
+from backend.app.retrieval.cross_encoder_reranker import (
+    CrossEncoderReranker,
+)
 from backend.app.retrieval.dense_retriever import (
     DenseRetriever,
 )
@@ -31,6 +34,9 @@ from backend.app.retrieval.qdrant import (
 )
 from backend.app.retrieval.qdrant_store import (
     QdrantVectorStore,
+)
+from backend.app.retrieval.reranking_retriever import (
+    RerankingRetriever,
 )
 from backend.app.retrieval.sparse_retriever import (
     SparseRetriever,
@@ -97,12 +103,15 @@ def _map_evaluation_cases(
     return mapped_cases
 
 
-
 @pytest.mark.asyncio
 async def test_dense_sparse_hybrid_benchmark():
     client = create_qdrant_client()
 
     try:
+        # --------------------------------------------------
+        # Golden dataset
+        # --------------------------------------------------
+
         mapping = await _build_golden_id_mapping(client)
 
         golden_cases = get_embedding_evaluation_cases()
@@ -160,6 +169,7 @@ async def test_dense_sparse_hybrid_benchmark():
 
         k = 5
         rrf_k_values = [5, 10, 20, 60]
+        candidate_k_values = [10, 20, 30]
 
         # --------------------------------------------------
         # Dense
@@ -218,7 +228,67 @@ async def test_dense_sparse_hybrid_benchmark():
             hybrid_metrics_by_rrf_k[rrf_k] = hybrid_metrics
 
         # --------------------------------------------------
-        # Print baseline benchmark
+        # Hybrid baseline for reranking
+        # --------------------------------------------------
+
+        hybrid_retriever = HybridRetriever(
+            dense_retriever=dense_retriever,
+            sparse_retriever=sparse_retriever,
+            rrf_k=60,
+        )
+
+        hybrid_runner = DenseRetrievalEvaluationRunner(
+            retriever=hybrid_retriever,
+        )
+
+        hybrid_results = await hybrid_runner.evaluate_cases(
+            cases,
+            k=k,
+        )
+
+        hybrid_metrics = hybrid_runner.aggregate_results(
+            hybrid_results,
+        )
+
+        # --------------------------------------------------
+        # Cross-Encoder candidate_k benchmark
+        # --------------------------------------------------
+
+        reranker = CrossEncoderReranker()
+
+        reranked_results_by_candidate_k = {}
+        reranked_metrics_by_candidate_k = {}
+
+        for candidate_k in candidate_k_values:
+            reranking_retriever = RerankingRetriever(
+                retriever=hybrid_retriever,
+                reranker=reranker,
+                candidate_k=candidate_k,
+            )
+
+            reranking_runner = DenseRetrievalEvaluationRunner(
+                retriever=reranking_retriever,
+            )
+
+            reranked_results = await reranking_runner.evaluate_cases(
+                cases,
+                k=k,
+            )
+
+            reranked_metrics = reranking_runner.aggregate_results(
+                reranked_results,
+            )
+
+            reranked_results_by_candidate_k[candidate_k] = (
+                reranked_results
+            )
+
+            reranked_metrics_by_candidate_k[candidate_k] = (
+                reranked_metrics
+            )
+
+        # --------------------------------------------------
+        # Baseline benchmark
         # --------------------------------------------------
 
         print("\n" + "=" * 72)
@@ -245,7 +315,7 @@ async def test_dense_sparse_hybrid_benchmark():
         )
 
         # --------------------------------------------------
-        # Print RRF tuning results
+        # RRF summary
         # --------------------------------------------------
 
         print("\n" + "=" * 72)
@@ -263,60 +333,126 @@ async def test_dense_sparse_hybrid_benchmark():
             )
 
         # --------------------------------------------------
-        # Query-level analysis
+        # Candidate K benchmark
         # --------------------------------------------------
 
         print("\n" + "=" * 72)
-        print("QUERY-LEVEL ANALYSIS")
+        print("CROSS-ENCODER CANDIDATE_K BENCHMARK")
         print("=" * 72)
 
-        for rrf_k in rrf_k_values:
-            hybrid_results = hybrid_results_by_rrf_k[rrf_k]
+        print(
+            "\nHybrid baseline / RRF k=60:"
+            f"\n  Recall@5:    {hybrid_metrics.recall_at_k:.4f}"
+            f"\n  Precision@5: {hybrid_metrics.precision_at_k:.4f}"
+            f"\n  MRR:         {hybrid_metrics.mrr:.4f}"
+        )
 
-            print("\n" + "-" * 72)
-            print(f"RRF k={rrf_k}")
-            print("-" * 72)
+        for candidate_k in candidate_k_values:
+            metrics = reranked_metrics_by_candidate_k[
+                candidate_k
+            ]
 
-            for case, dense, sparse, hybrid in zip(
-                cases,
-                dense_results,
-                sparse_results,
-                hybrid_results,
-            ):
-                print(f"\nQuery: {case.query}")
+            print(
+                f"\nCandidate k={candidate_k}:"
+                f"\n  Recall@5:    {metrics.recall_at_k:.4f}"
+                f"\n  Precision@5: {metrics.precision_at_k:.4f}"
+                f"\n  MRR:         {metrics.mrr:.4f}"
+            )
 
-                print(
-                    f"Dense   → "
-                    f"R={dense.recall_at_k:.2f} "
-                    f"P={dense.precision_at_k:.2f} "
-                    f"MRR={dense.mrr:.2f}"
-                )
+            print(
+                f"  Recall Δ:    "
+                f"{metrics.recall_at_k - hybrid_metrics.recall_at_k:+.4f}"
+            )
 
-                print(
-                    f"Sparse  → "
-                    f"R={sparse.recall_at_k:.2f} "
-                    f"P={sparse.precision_at_k:.2f} "
-                    f"MRR={sparse.mrr:.2f}"
-                )
+            print(
+                f"  Precision Δ: "
+                f"{metrics.precision_at_k - hybrid_metrics.precision_at_k:+.4f}"
+            )
 
-                print(
-                    f"Hybrid  → "
-                    f"R={hybrid.recall_at_k:.2f} "
-                    f"P={hybrid.precision_at_k:.2f} "
-                    f"MRR={hybrid.mrr:.2f}"
-                )
+            print(
+                f"  MRR Δ:        "
+                f"{metrics.mrr - hybrid_metrics.mrr:+.4f}"
+            )
 
-                print(
-                    f"Relevant: "
-                    f"{sorted(case.relevant_chunk_ids)}"
-                )
-
-                print(
-                    f"Hybrid ranking: "
-                    f"{hybrid.ranked_chunk_ids[:5]}"
-                )
+        # --------------------------------------------------
+        # Query-level changes only
+        # --------------------------------------------------
 
         print("\n" + "=" * 72)
+        print("QUERIES AFFECTED BY CANDIDATE_K")
+        print("=" * 72)
+
+        affected_queries = 0
+
+        for index, case in enumerate(cases):
+            baseline = hybrid_results[index]
+
+            candidate_metrics = []
+
+            for candidate_k in candidate_k_values:
+                result = reranked_results_by_candidate_k[
+                    candidate_k
+                ][index]
+
+                candidate_metrics.append(
+                    (
+                        candidate_k,
+                        result.recall_at_k,
+                        result.precision_at_k,
+                        result.mrr,
+                    )
+                )
+
+            baseline_metrics = (
+                baseline.recall_at_k,
+                baseline.precision_at_k,
+                baseline.mrr,
+            )
+
+            changed = any(
+                (
+                    recall,
+                    precision,
+                    mrr,
+                )
+                != baseline_metrics
+                for _, recall, precision, mrr in candidate_metrics
+            )
+
+            if not changed:
+                continue
+
+            affected_queries += 1
+
+            print(f"\nQuery: {case.query}")
+
+            print(
+                f"  Hybrid k=60 → "
+                f"R={baseline.recall_at_k:.2f} "
+                f"P={baseline.precision_at_k:.2f} "
+                f"MRR={baseline.mrr:.2f}"
+            )
+
+            for (
+                candidate_k,
+                recall,
+                precision,
+                mrr,
+            ) in candidate_metrics:
+                print(
+                    f"  candidate_k={candidate_k} → "
+                    f"R={recall:.2f} "
+                    f"P={precision:.2f} "
+                    f"MRR={mrr:.2f}"
+                )
+
+        if affected_queries == 0:
+            print("\nNo queries changed across candidate_k values.")
+
+        print(
+            f"\nAffected queries: "
+            f"{affected_queries}/{len(cases)}"
+        )
 
         # --------------------------------------------------
         # Sanity checks
@@ -324,10 +460,16 @@ async def test_dense_sparse_hybrid_benchmark():
 
         assert len(dense_results) == len(cases)
         assert len(sparse_results) == len(cases)
+        assert len(hybrid_results) == len(cases)
 
         for rrf_k in rrf_k_values:
             assert len(
                 hybrid_results_by_rrf_k[rrf_k]
+            ) == len(cases)
+
+        for candidate_k in candidate_k_values:
+            assert len(
+                reranked_results_by_candidate_k[candidate_k]
             ) == len(cases)
 
     finally:

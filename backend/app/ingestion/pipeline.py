@@ -71,6 +71,7 @@ class IngestionPipeline:
         source_type: str,
         title: str | None = None,
         document_metadata: dict[str, Any] | None = None,
+        allow_existing_document: bool = False,
     ) -> IngestionPipelineResult:
 
         # -----------------------------------------------------
@@ -144,14 +145,25 @@ class IngestionPipeline:
             # 5. Persist source data in PostgreSQL
             # -------------------------------------------------
 
-            persistence_result = (
-                await self.ingestion_service.persist(
-                    processed_result,
-                    source_type=source_type,
-                    title=title,
-                    document_metadata=document_metadata,
+            if allow_existing_document:
+                persistence_result = (
+                    await self.ingestion_service.persist(
+                        processed_result,
+                        source_type=source_type,
+                        title=title,
+                        document_metadata=document_metadata,
+                        allow_existing=True,
+                    )
                 )
-            )
+            else:
+                persistence_result = (
+                    await self.ingestion_service.persist(
+                        processed_result,
+                        source_type=source_type,
+                        title=title,
+                        document_metadata=document_metadata,
+                    )
+                )
 
             # -------------------------------------------------
             # 6. Attach document to ingestion run

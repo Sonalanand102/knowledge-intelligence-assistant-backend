@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -17,5 +18,11 @@ class SearchResultResponse(BaseModel):
 
 
 class SearchResponse(BaseModel):
+    query: str
+    results: list[SearchResultResponse]
+
+
+class ChatSearchResponse(BaseModel):
+    chat_id: UUID
     query: str
     results: list[SearchResultResponse]

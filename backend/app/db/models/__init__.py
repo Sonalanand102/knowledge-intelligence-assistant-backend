@@ -1,3 +1,6 @@
+from backend.app.db.models.chat import Chat
+from backend.app.db.models.chat_document import ChatDocument
+
 from backend.app.db.models.element_relationship import (
     ElementRelationship,
 )
@@ -12,6 +15,8 @@ from backend.app.db.models.source_element import (
 )
 
 __all__ = [
+    "Chat",
+    "ChatDocument",
     "SourceDocument",
     "SourceElement",
     "ElementRelationship",
