@@ -123,10 +123,14 @@ async def test_ingestion_service_persists_result():
 
         assert len(elements) == 2
 
+        canonical_paragraph_id = (
+            f"{document_id}:{paragraph_id}"
+        )
+
         relationship = await session.scalar(
             select(ElementRelationship).where(
                 ElementRelationship.source_element_id
-                == paragraph_id
+                == canonical_paragraph_id
             )
         )
 

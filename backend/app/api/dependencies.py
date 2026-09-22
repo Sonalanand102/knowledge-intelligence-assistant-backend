@@ -23,6 +23,14 @@ from backend.app.services.chat_answer_service import (
     ChatAnswerService,
 )
 
+from backend.app.services.chat_message_service import (
+    ChatMessageService,
+)
+
+from backend.app.services.document_management_service import (
+    DocumentManagementService,
+)
+
 def get_search_service(
     request: Request,
 ) -> SearchService:
@@ -54,4 +62,14 @@ def get_chat_answer_service(
 ) -> ChatAnswerService:
     return ChatAnswerService(
         answer_service=request.app.state.answer_service,
+    )
+
+def get_chat_message_service() -> ChatMessageService:
+    return ChatMessageService()
+
+def get_document_management_service(
+    request: Request,
+) -> DocumentManagementService:
+    return DocumentManagementService(
+        job_queue=request.app.state.document_job_queue,
     )

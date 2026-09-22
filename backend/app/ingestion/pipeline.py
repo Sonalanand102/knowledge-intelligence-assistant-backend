@@ -18,6 +18,14 @@ from backend.app.retrieval.vector_indexer import (
     VectorIndexer,
 )
 
+from backend.app.ingestion.enrichment.service import (
+    EnrichmentService,
+)
+
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class IngestionPipelineResult:
@@ -58,11 +66,13 @@ class IngestionPipeline:
             [IngestionResult],
             list[ChunkDocument],
         ],
+        enricher: EnrichmentService | None = None,
     ) -> None:
         self.ingestion_service = ingestion_service
         self.vector_indexer = vector_indexer
         self.preprocessor = preprocessor
         self.chunker = chunker
+        self.enricher = enricher
 
     async def ingest(
         self,
@@ -74,6 +84,12 @@ class IngestionPipeline:
         allow_existing_document: bool = False,
     ) -> IngestionPipelineResult:
 
+        pipeline_started_at = time.perf_counter()
+
+        logger.info(
+            "[PIPELINE] started source_type=%s",
+            source_type,
+        )
         # -----------------------------------------------------
         # 1. Start ingestion run
         # -----------------------------------------------------
@@ -89,6 +105,9 @@ class IngestionPipeline:
             # -------------------------------------------------
             # 2. Load
             # -------------------------------------------------
+            load_started_at = time.perf_counter()
+
+            logger.info("[PIPELINE] loader started")
 
             ingestion_result = await asyncio.to_thread(
                 loader
@@ -102,13 +121,62 @@ class IngestionPipeline:
                     "Loader must return an IngestionResult"
                 )
 
+            logger.info(
+                "[PIPELINE] loader completed duration=%.2fs elements=%d relationships=%d",
+                time.perf_counter() - load_started_at,
+                len(ingestion_result.elements),
+                len(ingestion_result.relationships),
+            )
+
+            # -------------------------------------------------
+            # 3. Semantic enrichment
+            # -------------------------------------------------
+
+            if self.enricher is not None:
+
+                enrichment_started_at = time.perf_counter()
+
+                logger.info(
+                    "[PIPELINE] enrichment started elements=%d",
+                    len(ingestion_result.elements),
+                )
+
+                ingestion_result = await asyncio.to_thread(
+                    self.enricher.enrich,
+                    ingestion_result,
+                )
+
+                logger.info(
+                    "[PIPELINE] enrichment completed duration=%.2fs elements=%d relationships=%d",
+                    time.perf_counter() - enrichment_started_at,
+                    len(ingestion_result.elements),
+                    len(ingestion_result.relationships),
+                )
+
+                if not isinstance(
+                    ingestion_result,
+                    IngestionResult,
+                ):
+                    raise TypeError(
+                        "Enricher must return an IngestionResult"
+                    )
+
             # -------------------------------------------------
             # 3. Preprocess
             # -------------------------------------------------
 
+            preprocess_started_at = time.perf_counter()
+
+            logger.info("[PIPELINE] preprocessing started")
+
             processed_result = await asyncio.to_thread(
                 self.preprocessor,
                 ingestion_result,
+            )
+
+            logger.info(
+                "[PIPELINE] preprocessing completed duration=%.2fs",
+                time.perf_counter() - preprocess_started_at,
             )
 
             if not isinstance(
@@ -123,9 +191,19 @@ class IngestionPipeline:
             # 4. Chunk
             # -------------------------------------------------
 
+            chunk_started_at = time.perf_counter()
+
+            logger.info("[PIPELINE] chunking started")
+
             chunks = await asyncio.to_thread(
                 self.chunker,
                 processed_result,
+            )
+
+            logger.info(
+                "[PIPELINE] chunking completed duration=%.2fs chunks=%d",
+                time.perf_counter() - chunk_started_at,
+                len(chunks),
             )
 
             if not isinstance(chunks, list):
@@ -146,6 +224,11 @@ class IngestionPipeline:
             # -------------------------------------------------
 
             if allow_existing_document:
+
+                persist_started_at = time.perf_counter()
+
+                logger.info("[PIPELINE] postgres persistence started")
+
                 persistence_result = (
                     await self.ingestion_service.persist(
                         processed_result,
@@ -155,7 +238,19 @@ class IngestionPipeline:
                         allow_existing=True,
                     )
                 )
+
+                logger.info(
+                    "[PIPELINE] postgres persistence completed duration=%.2fs elements=%d relationships=%d",
+                    time.perf_counter() - persist_started_at,
+                    persistence_result.elements_persisted,
+                    persistence_result.relationships_persisted,
+                )
             else:
+
+                persist_started_at = time.perf_counter()
+
+                logger.info("[PIPELINE] postgres persistence started")
+
                 persistence_result = (
                     await self.ingestion_service.persist(
                         processed_result,
@@ -163,6 +258,13 @@ class IngestionPipeline:
                         title=title,
                         document_metadata=document_metadata,
                     )
+                )
+
+                logger.info(
+                    "[PIPELINE] postgres persistence completed duration=%.2fs elements=%d relationships=%d",
+                    time.perf_counter() - persist_started_at,
+                    persistence_result.elements_persisted,
+                    persistence_result.relationships_persisted,
                 )
 
             # -------------------------------------------------
@@ -178,8 +280,18 @@ class IngestionPipeline:
             # 7. Index chunks in Qdrant
             # -------------------------------------------------
 
-            await self.vector_indexer.index(
-                chunks
+            index_started_at = time.perf_counter()
+
+            logger.info(
+                "[PIPELINE] qdrant indexing started chunks=%d",
+                len(chunks),
+            )
+
+            await self.vector_indexer.index(chunks)
+
+            logger.info(
+                "[PIPELINE] qdrant indexing completed duration=%.2fs",
+                time.perf_counter() - index_started_at,
             )
 
             # -------------------------------------------------
@@ -202,6 +314,10 @@ class IngestionPipeline:
                 stats=stats,
             )
 
+            logger.info(
+                "[PIPELINE] completed total_duration=%.2fs",
+                time.perf_counter() - pipeline_started_at,
+            )
             # -------------------------------------------------
             # 9. Return pipeline result
             # -------------------------------------------------

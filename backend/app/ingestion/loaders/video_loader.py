@@ -1,228 +1,3 @@
-# from pathlib import Path
-# import subprocess
-
-# from backend.app.ingestion.media.audio_extractor import extract_audio
-# from backend.app.ingestion.media.video_frame_extractor import (
-#     extract_key_frames,
-# )
-# from backend.app.ingestion.media.transcribers.whisper_transcriber import (
-#     WhisperTranscriber,
-# )
-# from backend.app.ingestion.models.content import (
-#     AudioContent,
-#     ImageContent,
-#     TextContent,
-#     VideoContent,
-# )
-# from backend.app.ingestion.models.source_document import SourceDocument
-
-
-# def find_sidecar_caption(video_path: Path) -> Path | None:
-#     """
-#     Look for a subtitle file next to the video.
-#     """
-
-#     for extension in (".srt", ".vtt"):
-#         caption_path = video_path.with_suffix(extension)
-
-#         if caption_path.exists():
-#             return caption_path
-
-#     return None
-
-
-# def extract_embedded_captions(
-#     video_path: str,
-# ) -> str | None:
-#     """
-#     Extract the first embedded subtitle stream using FFmpeg.
-#     Returns None if the video has no subtitle stream.
-#     """
-
-#     command = [
-#         "ffmpeg",
-#         "-i",
-#         video_path,
-#         "-map",
-#         "0:s:0",
-#         "-f",
-#         "webvtt",
-#         "pipe:1",
-#     ]
-
-#     result = subprocess.run(
-#         command,
-#         capture_output=True,
-#         text=True,
-#     )
-
-#     if result.returncode != 0:
-#         return None
-
-#     captions = result.stdout.strip()
-
-#     return captions or None
-
-
-# def load_caption_text(
-#     video_path: Path,
-# ) -> tuple[str | None, str | None]:
-#     """
-#     Try sidecar captions first, then embedded captions.
-
-#     Returns:
-#         (caption_text, caption_source)
-#     """
-
-#     sidecar_caption = find_sidecar_caption(video_path)
-
-#     if sidecar_caption:
-#         text = sidecar_caption.read_text(
-#             encoding="utf-8"
-#         ).strip()
-
-#         if text:
-#             return text, "sidecar"
-
-#     embedded_caption = extract_embedded_captions(
-#         str(video_path)
-#     )
-
-#     if embedded_caption:
-#         return embedded_caption, "embedded"
-
-#     return None, None
-
-
-# def create_whisper_transcript(
-#     video_path: str,
-#     output_dir: str,
-#     document_id: str,
-#     file_name: str,
-#     whisper_transcriber: WhisperTranscriber,
-# ) -> SourceDocument:
-
-#     audio_dir = Path(output_dir) / "audio"
-
-#     audio_path = extract_audio(
-#         video_path=video_path,
-#         output_dir=str(audio_dir),
-#     )
-
-#     transcript = whisper_transcriber.transcribe(
-#         audio_path
-#     )
-
-#     return SourceDocument(
-#         document_id=document_id,
-#         source_type="video",
-#         content=TextContent(text=transcript),
-#         metadata={
-#             "file_name": file_name,
-#             "content_type": "transcript",
-#             "transcript_source": "whisper",
-#         },
-#     )
-
-
-# def load_video(
-#     file_path: str,
-#     document_id: str,
-#     output_dir: str,
-#     whisper_transcriber: WhisperTranscriber,
-# ) -> list[SourceDocument]:
-
-#     video_path = Path(file_path)
-
-#     if not video_path.exists():
-#         raise FileNotFoundError(
-#             f"Video file not found: {file_path}"
-#         )
-
-#     if not video_path.is_file():
-#         raise ValueError(
-#             f"Video path is not a file: {file_path}"
-#         )
-
-#     output_path = Path(output_dir)
-#     output_path.mkdir(
-#         parents=True,
-#         exist_ok=True,
-#     )
-
-#     documents: list[SourceDocument] = []
-
-#     # --------------------------------------------------
-#     # 1. Original video
-#     # --------------------------------------------------
-
-#     video_document = SourceDocument(
-#         document_id=document_id,
-#         source_type="video",
-#         content=VideoContent(
-#             path=str(video_path)
-#         ),
-#         metadata={
-#             "file_name": video_path.name,
-#             "content_type": "video",
-#         },
-#     )
-
-#     documents.append(video_document)
-
-#     # --------------------------------------------------
-#     # 2. Captions first, Whisper fallback
-#     # --------------------------------------------------
-
-#     caption_text, caption_source = load_caption_text(
-#         video_path
-#     )
-
-#     if caption_text:
-#         caption_document = SourceDocument(
-#             document_id=document_id,
-#             source_type="video",
-#             content=TextContent(
-#                 text=caption_text
-#             ),
-#             metadata={
-#                 "file_name": video_path.name,
-#                 "content_type": "transcript",
-#                 "transcript_source": caption_source,
-#             },
-#         )
-
-#         documents.append(caption_document)
-
-#     else:
-#         transcript_document = create_whisper_transcript(
-#             video_path=str(video_path),
-#             output_dir=str(output_path),
-#             document_id=document_id,
-#             file_name=video_path.name,
-#             whisper_transcriber=whisper_transcriber,
-#         )
-
-#         documents.append(transcript_document)
-
-#     # --------------------------------------------------
-#     # 3. Intelligent key frames
-#     # --------------------------------------------------
-
-#     frame_output_dir = (
-#         output_path / f"{document_id}_frames"
-#     )
-
-#     frame_documents = extract_key_frames(
-#         video_path=str(video_path),
-#         output_dir=str(frame_output_dir),
-#         document_id=document_id,
-#     )
-
-#     documents.extend(frame_documents)
-
-#     return documents
-
 from __future__ import annotations
 
 import re
@@ -230,9 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from backend.app.ingestion.media.audio_extractor import (
-    extract_audio,
-)
+
 from backend.app.ingestion.media.video_frame_extractor import (
     extract_key_frames,
 )
@@ -259,6 +32,11 @@ from backend.app.ingestion.models.source_element import (
 from backend.app.ingestion.relationships.temporal import (
     resolve_temporal_relationships,
 )
+
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 
 FrameExtractor = Callable[
@@ -425,30 +203,97 @@ def _parse_caption_text(
 def extract_embedded_captions(
     video_path: str,
 ) -> str | None:
-    command = [
+    probe_command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "s",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "csv=p=0",
+        video_path,
+    ]
+
+    try:
+        probe_result = subprocess.run(
+            probe_command,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "[VIDEO] subtitle stream detection timed out file=%s",
+            video_path,
+        )
+        return None
+
+    if probe_result.returncode != 0:
+        logger.warning(
+            "[VIDEO] subtitle stream detection failed file=%s",
+            video_path,
+        )
+        return None
+
+    stream_indexes = [
+        line.strip()
+        for line in probe_result.stdout.splitlines()
+        if line.strip()
+    ]
+
+    if not stream_indexes:
+        logger.info(
+            "[VIDEO] no embedded subtitle stream file=%s",
+            video_path,
+        )
+        return None
+
+    subtitle_index = stream_indexes[0]
+
+    logger.info(
+        "[VIDEO] embedded subtitle stream found index=%s",
+        subtitle_index,
+    )
+
+    extract_command = [
         "ffmpeg",
+        "-v",
+        "error",
         "-i",
         video_path,
         "-map",
-        "0:s:0",
+        f"0:{subtitle_index}",
         "-f",
         "webvtt",
         "pipe:1",
     ]
 
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            extract_command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "[VIDEO] embedded subtitle extraction timed out file=%s",
+            video_path,
+        )
+        return None
 
     if result.returncode != 0:
+        logger.warning(
+            "[VIDEO] embedded subtitle extraction failed file=%s",
+            video_path,
+        )
         return None
 
     captions = result.stdout.strip()
 
     return captions or None
-
 
 def load_caption_segments(
     video_path: Path,
@@ -456,33 +301,47 @@ def load_caption_segments(
     list[TranscriptSegment],
     str | None,
 ]:
-    sidecar_caption = (
-        find_sidecar_caption(
-            video_path
-        )
+    logger.info(
+        "[VIDEO] load_caption_segments ENTER file=%s",
+        video_path.name,
+    )
+
+    sidecar_caption = find_sidecar_caption(
+        video_path
+    )
+
+    logger.info(
+        "[VIDEO] sidecar check completed result=%s",
+        sidecar_caption,
     )
 
     if sidecar_caption:
-        caption_text = (
-            sidecar_caption.read_text(
-                encoding="utf-8"
-            )
+        caption_text = sidecar_caption.read_text(
+            encoding="utf-8"
         )
 
         segments = _parse_caption_text(
             caption_text
         )
 
-        if segments:
-            return (
-                segments,
-                "sidecar",
-            )
-
-    embedded_caption = (
-        extract_embedded_captions(
-            str(video_path)
+        logger.info(
+            "[VIDEO] sidecar captions parsed segments=%d",
+            len(segments),
         )
+
+        if segments:
+            return segments, "sidecar"
+
+    logger.info(
+        "[VIDEO] starting embedded caption extraction"
+    )
+
+    embedded_caption = extract_embedded_captions(
+        str(video_path)
+    )
+
+    logger.info(
+        "[VIDEO] embedded caption extraction returned"
     )
 
     if embedded_caption:
@@ -491,16 +350,13 @@ def load_caption_segments(
         )
 
         if segments:
-            return (
-                segments,
-                "embedded",
-            )
+            return segments, "embedded"
 
-    return (
-        [],
-        None,
+    logger.info(
+        "[VIDEO] no captions found, returning empty"
     )
 
+    return [], None
 
 def _caption_segment_to_element(
     segment: TranscriptSegment,
@@ -541,21 +397,24 @@ def create_whisper_transcript(
     file_name: str,
     whisper_transcriber: WhisperTranscriber,
 ) -> list[SourceElement]:
-    audio_dir = (
-        Path(output_dir)
-        / "audio"
+    whisper_started_at = time.perf_counter()
+
+    logger.info(
+        "[VIDEO] Whisper transcription started file=%s",
+        file_name,
     )
 
-    audio_path = extract_audio(
-        video_path=video_path,
-        output_dir=str(audio_dir),
-    )
-
-    segments = (
-        whisper_transcriber
-        .transcribe_segments(
-            audio_path
+    transcript_segments = (
+        whisper_transcriber.transcribe_segments(
+            video_path
         )
+    )
+
+    logger.info(
+        "[VIDEO] Whisper transcription completed "
+        "duration=%.2fs segments=%d",
+        time.perf_counter() - whisper_started_at,
+        len(transcript_segments),
     )
 
     return [
@@ -567,11 +426,10 @@ def create_whisper_transcript(
             transcript_source="whisper",
         )
         for index, segment in enumerate(
-            segments,
+            transcript_segments,
             start=1,
         )
     ]
-
 
 def _frame_documents_to_elements(
     frame_documents: list[SourceDocument],
@@ -607,7 +465,7 @@ def load_video(
     file_path: str,
     document_id: str,
     output_dir: str,
-    whisper_transcriber: WhisperTranscriber,
+    whisper_transcriber: WhisperTranscriber | None = None,
     frame_extractor: FrameExtractor | None = None,
     whisper_transcript_creator=None,
 ) -> IngestionResult:
@@ -691,12 +549,28 @@ def load_video(
         ]
 
     else:
+        if whisper_transcriber is None:
+            whisper_transcriber = WhisperTranscriber()
+    
+        whisper_started_at = time.perf_counter()
+
+        logger.info(
+            "[VIDEO] transcription started file=%s",
+            video_path.name,
+        )
+
         transcript_elements = whisper_transcript_creator(
             video_path=str(video_path),
             output_dir=str(output_path),
             document_id=document_id,
             file_name=video_path.name,
             whisper_transcriber=whisper_transcriber,
+        )
+
+        logger.info(
+            "[VIDEO] transcription completed duration=%.2fs segments=%d",
+            time.perf_counter() - whisper_started_at,
+            len(transcript_elements),
         )
 
     elements.extend(
@@ -722,10 +596,23 @@ def load_video(
         / f"{document_id}_frames"
     )
 
+    frames_started_at = time.perf_counter()
+
+    logger.info(
+        "[VIDEO] frame extraction started file=%s",
+        video_path.name,
+    )
+
     frame_documents = frame_extractor(
         str(video_path),
         str(frame_output_dir),
         document_id,
+    )
+
+    logger.info(
+        "[VIDEO] frame extraction completed duration=%.2fs frames=%d",
+        time.perf_counter() - frames_started_at,
+        len(frame_documents),
     )
 
     frame_elements = (
@@ -752,10 +639,20 @@ def load_video(
     # ---------------------------------------------------------
     # Transcript ↔ frame relationships
     # ---------------------------------------------------------
-    relationships.extend(
-        resolve_temporal_relationships(
-            elements
-        )
+    relationship_started_at = time.perf_counter()
+
+    logger.info("[VIDEO] temporal relationship resolution started")
+
+    temporal_relationships = resolve_temporal_relationships(
+        elements
+    )
+
+    relationships.extend(temporal_relationships)
+
+    logger.info(
+        "[VIDEO] temporal relationship resolution completed duration=%.2fs relationships=%d",
+        time.perf_counter() - relationship_started_at,
+        len(temporal_relationships),
     )
 
     return IngestionResult(

@@ -37,6 +37,16 @@ from backend.app.retrieval.search_service import (
     SearchService,
 )
 
+from backend.app.retrieval.relationship_aware_retriever import (
+    RelationshipAwareRetriever,
+)
+from backend.app.retrieval.relationship_context_expander import (
+    RelationshipContextExpander,
+)
+from backend.app.retrieval.relationship_store import (
+    SqlAlchemyRelationshipStore,
+)
+
 from backend.app.generation.answer_service import (
     AnswerService,
 )
@@ -61,6 +71,7 @@ from backend.app.services.file_storage import (
 )
 
 from backend.app.api.v1.documents import (
+    document_router,
     router as documents_router,
 )
 
@@ -112,9 +123,27 @@ async def lifespan(app: FastAPI):
             sparse_retriever=sparse_retriever,
         )
 
+        # --------------------------------------------------
+        # Relationship-aware retrieval
+        # --------------------------------------------------
+
+        relationship_store = SqlAlchemyRelationshipStore()
+
+        context_expander = RelationshipContextExpander(
+            store=relationship_store,
+        )
+
+        relationship_aware_retriever = RelationshipAwareRetriever(
+            retriever=hybrid_retriever,
+            context_expander=context_expander,
+        )
+
+        # --------------------------------------------------
+        # Application services
+        # --------------------------------------------------
 
         search_service = SearchService(
-            retriever=hybrid_retriever,
+            retriever=relationship_aware_retriever,
         )
 
         answer_generator = GeminiAnswerGenerator(
@@ -122,7 +151,7 @@ async def lifespan(app: FastAPI):
         )
 
         answer_service = AnswerService(
-            retriever=hybrid_retriever,
+            retriever=relationship_aware_retriever,
             answer_generator=answer_generator,
         )
 
@@ -245,6 +274,11 @@ app.include_router(
 
 app.include_router(
     documents_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    document_router,
     prefix="/api/v1",
 )
 

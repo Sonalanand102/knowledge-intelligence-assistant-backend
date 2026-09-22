@@ -14,6 +14,9 @@ from backend.app.db.models.source_element import (
     SourceElement,
 )
 
+from backend.app.db.models.user import User
+from backend.app.db.models.chat_message import ChatMessage
+
 __all__ = [
     "Chat",
     "ChatDocument",
@@ -21,4 +24,6 @@ __all__ = [
     "SourceElement",
     "ElementRelationship",
     "IngestionRun",
+    "User",
+    "ChatMessage"
 ]

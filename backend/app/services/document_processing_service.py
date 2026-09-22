@@ -15,6 +15,15 @@ from backend.app.embeddings.service import EmbeddingService
 from backend.app.ingestion.chunking.text_chunker import (
     chunk_documents,
 )
+from backend.app.ingestion.enrichment.image_enricher import (
+    ImageEnricher,
+)
+from backend.app.ingestion.enrichment.providers.gemini_image import (
+    GeminiImageSemanticProvider,
+)
+from backend.app.ingestion.enrichment.service import (
+    EnrichmentService,
+)
 from backend.app.ingestion.loader_registry import (
     LoaderRegistry,
 )
@@ -99,6 +108,10 @@ class DocumentProcessingService:
             "processing",
         )
 
+        # --------------------------------------------------
+        # External clients
+        # --------------------------------------------------
+
         gemini_client = genai.Client(
             api_key=settings.gemini_api_key,
         )
@@ -106,6 +119,10 @@ class DocumentProcessingService:
         qdrant_client = create_qdrant_client()
 
         try:
+            # --------------------------------------------------
+            # Embedding
+            # --------------------------------------------------
+
             embedding_provider = (
                 GeminiEmbeddingProvider(
                     client=gemini_client,
@@ -118,6 +135,10 @@ class DocumentProcessingService:
                 )
             )
 
+            # --------------------------------------------------
+            # Vector store
+            # --------------------------------------------------
+
             vector_store = QdrantVectorStore(
                 client=qdrant_client,
                 collection_name=(
@@ -125,10 +146,36 @@ class DocumentProcessingService:
                 ),
             )
 
+            # Remove previous vectors during reprocessing.
+            await vector_store.delete_by_document_id(
+                document_id
+            )
+
             vector_indexer = VectorIndexer(
                 embedding_service=embedding_service,
                 vector_store=vector_store,
             )
+
+            # --------------------------------------------------
+            # Image enrichment
+            # --------------------------------------------------
+
+            image_provider = GeminiImageSemanticProvider(
+                client=gemini_client,
+                model="gemini-3.8-flash",
+            )
+
+            image_enricher = ImageEnricher(
+                provider=image_provider,
+            )
+
+            enrichment_service = EnrichmentService(
+                image_enricher=image_enricher,
+            )
+
+            # --------------------------------------------------
+            # Loader
+            # --------------------------------------------------
 
             loader_registry = LoaderRegistry()
 
@@ -138,6 +185,10 @@ class DocumentProcessingService:
                 document_id=document_id,
                 output_dir=str(output_dir),
             )
+
+            # --------------------------------------------------
+            # Ingestion pipeline
+            # --------------------------------------------------
 
             async with AsyncSessionLocal() as session:
                 ingestion_service = IngestionService(
@@ -153,6 +204,7 @@ class DocumentProcessingService:
                         preprocess_ingestion
                     ),
                     chunker=chunk_documents,
+                    enricher=enrichment_service,
                 )
 
                 result = await pipeline.ingest(
@@ -167,6 +219,10 @@ class DocumentProcessingService:
                     },
                     allow_existing_document=True,
                 )
+
+            # --------------------------------------------------
+            # Mark completed
+            # --------------------------------------------------
 
             await self._update_status(
                 document_id,

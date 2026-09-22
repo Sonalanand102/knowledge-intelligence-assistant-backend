@@ -118,8 +118,8 @@ def test_related_elements_are_recorded_in_metadata():
     chunks = chunk_documents(result, chunk_size=100, chunk_overlap=0,)
 
     assert chunks[0].metadata["element_ids"] == [
-        "heading-1",
-        "paragraph-1",
+        "document-1:heading-1",
+        "document-1:paragraph-1",
     ]
 
 
@@ -145,8 +145,8 @@ def test_relationship_metadata_is_preserved():
     relationships = chunks[0].metadata["relationships"]
 
     assert len(relationships) == 1
-    assert relationships[0]["source_element_id"] == "heading-1"
-    assert relationships[0]["target_element_id"] == "paragraph-1"
+    assert relationships[0]["source_element_id"] == "document-1:heading-1"
+    assert relationships[0]["target_element_id"] == "document-1:paragraph-1"
     assert relationships[0]["relationship_type"] == "parent_of"
     assert relationships[0]["metadata"]["confidence"] == 1.0
 
@@ -275,7 +275,7 @@ def test_related_multimodal_element_is_preserved_as_context():
 
     assert len(chunks) == 1
     assert chunks[0].content == "The architecture is shown below."
-    assert "image-1" in chunks[0].metadata["related_element_ids"]
+    assert "document-1:image-1" in chunks[0].metadata["related_element_ids"]
 
 
 def test_long_related_group_is_split_when_chunk_size_is_exceeded():
@@ -449,7 +449,7 @@ def test_oversized_element_preserves_split_metadata():
     assert len(chunks) > 1
 
     for chunk in chunks:
-        assert chunk.metadata["element_ids"] == ["element-1"]
+        assert chunk.metadata["element_ids"] == ["document-1:element-1"]
         assert chunk.metadata["split_from_element"] is True
         assert "split_index" in chunk.metadata
         assert "split_count" in chunk.metadata

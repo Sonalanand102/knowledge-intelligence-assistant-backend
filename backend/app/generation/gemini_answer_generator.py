@@ -18,10 +18,11 @@ class AnswerGenerationResponse(BaseModel):
         description="Grounded answer based only on the provided context."
     )
     citation_ids: list[int] = Field(
+        min_length=1,
         description=(
-            "1-based citation numbers corresponding to the provided "
-            "context chunks."
-        )
+            "At least one 1-based citation number corresponding "
+            "to the provided context chunks."
+        ),
     )
 
 
@@ -39,9 +40,15 @@ Rules:
 - If the context is insufficient, say that the available context is insufficient.
 - Keep the answer concise and directly answer the user's question.
 - Every factual claim must be supported by one or more provided context chunks.
-- Select citation_ids only from the provided context numbers.
+
+Citation rules:
+- You MUST return at least one citation_id when retrieved context is provided.
+- citation_ids must contain only valid 1-based context numbers.
+- Use the most relevant context chunks as citations.
+- Never return an empty citation_ids list.
 - Do not invent citation numbers.
-- Return only the structured response.
+
+Return only the structured response.
 """.strip()
 
     def __init__(
@@ -110,9 +117,9 @@ Rules:
         citation_ids = parsed.citation_ids
 
         if not citation_ids:
-            raise ValueError(
-                "Gemini returned no citation IDs"
-            )
+            # Gemini occasionally violates the citation contract.
+            # Fall back to the highest-ranked retrieved chunk.
+            citation_ids = [1]
 
         # Remove duplicate citation IDs while preserving order.
         unique_citation_ids = list(

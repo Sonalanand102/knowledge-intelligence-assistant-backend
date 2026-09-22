@@ -240,6 +240,13 @@ class QdrantVectorStore:
                 "document_id must be non-empty"
             )
 
+        exists = await self.client.collection_exists(
+            collection_name=self.collection_name,
+        )
+
+        if not exists:
+            return
+
         await self.client.delete(
             collection_name=self.collection_name,
             points_selector=models.FilterSelector(

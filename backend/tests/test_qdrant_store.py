@@ -194,6 +194,7 @@ class FakeQdrantClient:
         query,
         limit: int,
         with_payload: bool = True,
+        query_filter = None
     ) -> FakeQueryResponse:
         return FakeQueryResponse(
             points=[

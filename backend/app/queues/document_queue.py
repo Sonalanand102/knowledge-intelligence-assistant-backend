@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from redis import Redis
 from rq import Queue
 
@@ -21,15 +23,30 @@ class DocumentJobQueue:
             connection=self.redis,
         )
 
-    def enqueue(self, document_id: str):
+    def enqueue(
+        self,
+        document_id: str,
+        *,
+        retry: bool = False,
+    ):
         from backend.app.workers.document_worker import (
             process_document_job,
         )
 
+        if retry:
+            job_id = (
+                f"document-{document_id}-retry-"
+                f"{uuid.uuid4().hex}"
+            )
+        else:
+            job_id = (
+                f"document-{document_id}"
+            )
+
         return self.queue.enqueue(
             process_document_job,
             document_id,
-            job_id=f"document-{document_id}",
+            job_id=job_id,
             job_timeout="30m",
             result_ttl=86400,
         )

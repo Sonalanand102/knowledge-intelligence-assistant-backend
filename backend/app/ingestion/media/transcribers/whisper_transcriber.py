@@ -1,45 +1,13 @@
-# from faster_whisper import WhisperModel
-
-
-# class WhisperTranscriber:
-#     def __init__(
-#         self,
-#         model_size: str = "small",
-#         device: str = "cpu",
-#         compute_type: str = "int8",
-#     ):
-#         self.model = WhisperModel(
-#             model_size,
-#             device=device,
-#             compute_type=compute_type,
-#         )
-
-#     def transcribe(self, audio_path: str) -> str:
-#         segments, _ = self.model.transcribe(
-#             audio_path,
-#             vad_filter=True,
-#         )
-
-#         transcript_parts = []
-
-#         for segment in segments:
-#             text = segment.text.strip()
-
-#             if not text:
-#                 continue
-
-#             transcript_parts.append(
-#                 f"[{segment.start:.2f}s] {text}"
-#             )
-
-#         return "\n".join(transcript_parts)
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from faster_whisper import WhisperModel
 
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class TranscriptSegment:
@@ -55,19 +23,46 @@ class WhisperTranscriber:
         device: str = "cpu",
         compute_type: str = "int8",
     ):
+        logger.info(
+            "[WHISPER] model loading started model=%s device=%s compute_type=%s",
+            model_size,
+            device,
+            compute_type,
+        )
+
+        started_at = time.perf_counter()
+
         self.model = WhisperModel(
             model_size,
             device=device,
             compute_type=compute_type,
         )
 
+        logger.info(
+            "[WHISPER] model loading completed duration=%.2fs",
+            time.perf_counter() - started_at,
+        )
+        
     def transcribe_segments(
         self,
         audio_path: str,
     ) -> list[TranscriptSegment]:
+
+        started_at = time.perf_counter()
+
+        logger.info(
+            "[WHISPER] transcription started file=%s",
+            audio_path,
+        )
+
         segments, _ = self.model.transcribe(
             audio_path,
             vad_filter=True,
+        )
+
+        logger.info(
+            "[WHISPER] transcription completed duration=%.2fs",
+            time.perf_counter() - started_at,
         )
 
         transcript_segments = []

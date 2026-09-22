@@ -3,22 +3,22 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.base import Base
 
 
-class Chat(Base):
+class User(Base):
     """
-    Represents a logical conversation.
+    Represents an application user.
 
-    user_id is nullable for now so existing anonymous chats
-    continue to work before authentication is introduced.
+    Authentication is intentionally not implemented yet.
+    The model provides the persistence foundation for future auth.
     """
 
-    __tablename__ = "chats"
+    __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -26,19 +26,11 @@ class Chat(Base):
         default=uuid.uuid4,
     )
 
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey(
-            "users.id",
-            ondelete="CASCADE",
-        ),
-        nullable=True,
-        index=True,
-    )
-
-    title: Mapped[str] = mapped_column(
-        String(255),
+    email: Mapped[str] = mapped_column(
+        String(320),
+        unique=True,
         nullable=False,
+        index=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(

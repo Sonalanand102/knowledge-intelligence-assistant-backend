@@ -244,9 +244,9 @@ def test_gemini_answer_generator_rejects_empty_answer():
         )
 
 
-def test_gemini_answer_generator_requires_citations():
+def test_gemini_answer_generator_allows_empty_citations():
     client = FakeGeminiClient(
-        AnswerGenerationResponse(
+        AnswerGenerationResponse.model_construct(
             answer="RAG answer.",
             citation_ids=[],
         )
@@ -256,21 +256,23 @@ def test_gemini_answer_generator_requires_citations():
         client=client,
     )
 
-    with pytest.raises(
-        ValueError,
-        match="Gemini returned no citation IDs",
-    ):
-        generator.generate(
-            query="What is RAG?",
-            results=[
-                make_result(
-                    chunk_id="chunk-1",
-                    document_id="doc-1",
-                    content="RAG answer.",
-                ),
-            ],
-        )
+    result = generator.generate(
+        query="What is RAG?",
+        results=[
+            make_result(
+                chunk_id="chunk-1",
+                document_id="doc-1",
+                content="RAG answer.",
+            ),
+        ],
+    )
 
+    assert result.answer == "RAG answer."
+
+    assert len(result.citations) == 1
+    assert result.citations[0].citation_id == 1
+    assert result.citations[0].chunk_id == "chunk-1"
+    assert result.citations[0].document_id == "doc-1"
 
 def test_gemini_answer_generator_rejects_invalid_citation_ids():
     client = FakeGeminiClient(

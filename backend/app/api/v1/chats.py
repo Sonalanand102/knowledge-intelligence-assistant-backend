@@ -12,6 +12,7 @@ from backend.app.api.dependencies import (
     get_chat_answer_service,
     get_chat_search_service,
     get_chat_service,
+    get_chat_message_service
 )
 
 from backend.app.schemas.ask import (
@@ -46,6 +47,13 @@ from backend.app.services.chat_service import (
     ChatService,
 )
 
+from backend.app.schemas.chat_message import (
+    ChatMessageListResponse,
+)
+
+from backend.app.services.chat_message_service import (
+    ChatMessageService,
+)
 
 router = APIRouter(
     prefix="/chats",
@@ -165,6 +173,9 @@ async def ask_chat(
     chat_answer_service: ChatAnswerService = Depends(
         get_chat_answer_service,
     ),
+    chat_message_service: ChatMessageService = Depends(
+        get_chat_message_service,
+    ),
 ) -> ChatAskResponse:
     query = request.query.strip()
 
@@ -175,15 +186,60 @@ async def ask_chat(
         )
 
     try:
+        # -----------------------------------------------------
+        # 1. Persist user message
+        # -----------------------------------------------------
+
+        await chat_message_service.create_message(
+            chat_id=chat_id,
+            role="user",
+            content=query,
+        )
+
+        # -----------------------------------------------------
+        # 2. Generate grounded answer
+        # -----------------------------------------------------
+
         result = await chat_answer_service.answer(
             chat_id=chat_id,
             query=query,
             top_k=request.top_k,
         )
 
+        # -----------------------------------------------------
+        # 3. Convert citations to JSON-safe dictionaries
+        # -----------------------------------------------------
+
+        citation_payload = [
+            {
+                "citation_id": citation.citation_id,
+                "chunk_id": citation.chunk_id,
+                "document_id": citation.document_id,
+                "metadata": citation.metadata,
+            }
+            for citation in result.citations
+        ]
+
+        # -----------------------------------------------------
+        # 4. Persist assistant message
+        # -----------------------------------------------------
+
+        await chat_message_service.create_message(
+            chat_id=chat_id,
+            role="assistant",
+            content=result.answer,
+            citations=citation_payload,
+        )
+
     except ChatAnswerNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
 
@@ -202,10 +258,29 @@ async def ask_chat(
         ],
     )
 
-
 # ============================================================
 # GET CHAT
 # ============================================================
+
+@router.get(
+    "/{chat_id}/messages",
+    response_model=ChatMessageListResponse,
+)
+async def list_chat_messages(
+    chat_id: str,
+    chat_message_service: ChatMessageService = Depends(
+        get_chat_message_service,
+    ),
+) -> ChatMessageListResponse:
+    try:
+        return await chat_message_service.list_messages(
+            chat_id=chat_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
 @router.get(
     "/{chat_id}",
