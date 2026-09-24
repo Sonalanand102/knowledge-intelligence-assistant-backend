@@ -4,5 +4,13 @@ __pycache__/
 .mypy_cache/
 tmp/
 .env
+.env.*
+!.env.example
 .venv/
+venv/
 storage/
+.DS_Store
+.vscode/
+.idea/
+
+*.log
